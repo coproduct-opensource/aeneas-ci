@@ -22,8 +22,11 @@ if [ -z "${CHARON_REF:-}" ] || [ -z "${AENEAS_REF:-}" ]; then
 fi
 
 CACHE_DIR="$HOME/.aeneas-ci-cache"
-CHARON_BIN="$CACHE_DIR/charon-$CHARON_REF/charon"
-AENEAS_BIN="$CACHE_DIR/aeneas-$AENEAS_REF/aeneas"
+# Charon's Makefile puts the built binary in $CHARON_DIR/bin/charon.
+# Aeneas's Makefile puts the built binary in $AENEAS_DIR/bin/aeneas.
+# We cache-detect by checking the `bin/<tool>` file.
+CHARON_BIN="$CACHE_DIR/charon-$CHARON_REF/bin/charon"
+AENEAS_BIN="$CACHE_DIR/aeneas-$AENEAS_REF/bin/aeneas"
 
 mkdir -p "$CACHE_DIR"
 
@@ -65,7 +68,11 @@ else
   CHARON_DIR="$CACHE_DIR/charon-$CHARON_REF"
   rm -rf "$CHARON_DIR"
   git clone --quiet https://github.com/AeneasVerif/charon.git "$CHARON_DIR"
-  ( cd "$CHARON_DIR" && git checkout --quiet "$CHARON_REF" && make build-dev-rustc -j )
+  # `make build` is the release target: builds both the Rust half
+  # (MIR extractor) and the OCaml half (charon-ml), then copies the
+  # binary into $CHARON_DIR/bin/charon. See
+  # https://github.com/AeneasVerif/charon/blob/main/Makefile
+  ( cd "$CHARON_DIR" && git checkout --quiet "$CHARON_REF" && make build -j )
   echo "::endgroup::"
 fi
 echo "$(dirname "$CHARON_BIN")" >> "$GITHUB_PATH"
@@ -78,6 +85,8 @@ else
   AENEAS_DIR="$CACHE_DIR/aeneas-$AENEAS_REF"
   rm -rf "$AENEAS_DIR"
   git clone --quiet https://github.com/AeneasVerif/aeneas.git "$AENEAS_DIR"
+  # Aeneas's default target is `build` = `build-dev`, which produces
+  # bin/aeneas. Requires Charon on PATH (already set above).
   ( cd "$AENEAS_DIR" && git checkout --quiet "$AENEAS_REF" && make -j )
   echo "::endgroup::"
 fi
