@@ -1,0 +1,138 @@
+name: 'Aeneas Freshness Check'
+description: >
+  Regenerate Lean from Rust via Charon + Aeneas, then `git diff --exit-code`
+  against the committed Lean tree. Fails the PR if the generated tree has
+  drifted, with annotated regen instructions.
+
+  This is the canonical "build artifact + source of truth simultaneously"
+  pattern the Aeneas project uses internally (REGEN_LLBC=1 make test-…),
+  packaged for downstream consumers. No more silent drift between Rust
+  semantics and the Lean refinement targets.
+
+author: 'coproduct-opensource'
+branding:
+  icon: 'check-circle'
+  color: 'purple'
+
+inputs:
+  rust-source-dir:
+    description: >
+      Path to the Rust crate Aeneas operates on (the directory containing
+      Cargo.toml). E.g. `crates/olog-core`.
+    required: true
+  lean-output-dir:
+    description: >
+      Path to the committed Lean output tree Aeneas writes into (with
+      `-dest`). E.g. `lean/generated`.
+    required: true
+  charon-version:
+    description: >
+      Pinned Charon git ref (commit SHA or tag). Pinning is mandatory —
+      Charon's IR shape changes between releases, so unpinned setups are
+      a footgun. Find current pin at AeneasVerif/aeneas/charon-pin.
+    required: true
+  aeneas-version:
+    description: >
+      Pinned Aeneas git ref. Same reasoning as charon-version. The two
+      versions must be compatible — see AeneasVerif/aeneas releases for
+      the matched pairs.
+    required: true
+  fail-on-drift:
+    description: >
+      If "true" (default), exit non-zero when the regenerated tree differs
+      from the committed tree. Set "false" only for advisory runs.
+    default: 'true'
+    required: false
+  charon-extra-args:
+    description: >
+      Extra args appended to `charon cargo`. Default is `--preset aeneas`.
+    default: '--preset aeneas'
+    required: false
+  aeneas-extra-args:
+    description: >
+      Extra args appended to `aeneas -backend lean`. Default is
+      `-split-files`.
+    default: '-split-files'
+    required: false
+
+outputs:
+  drift-detected:
+    description: >
+      "true" if the regenerated Lean differs from the committed tree,
+      "false" otherwise. Useful for downstream conditional steps even
+      when fail-on-drift is "false".
+    value: ${{ steps.diff.outputs.drift }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Charon + Aeneas
+      shell: bash
+      env:
+        CHARON_REF: ${{ inputs.charon-version }}
+        AENEAS_REF: ${{ inputs.aeneas-version }}
+      run: ${{ github.action_path }}/scripts/install-aeneas.sh
+
+    - name: Regenerate LLBC + Lean
+      shell: bash
+      working-directory: ${{ inputs.rust-source-dir }}
+      env:
+        RUST_SRC_DIR: ${{ inputs.rust-source-dir }}
+        LEAN_OUT_DIR: ${{ inputs.lean-output-dir }}
+        CHARON_EXTRA: ${{ inputs.charon-extra-args }}
+        AENEAS_EXTRA: ${{ inputs.aeneas-extra-args }}
+      run: |
+        set -euo pipefail
+        # Resolve Lean output to absolute path before cd'ing into Rust src dir.
+        ABS_LEAN_OUT="$GITHUB_WORKSPACE/$LEAN_OUT_DIR"
+        echo "::group::Charon cargo"
+        charon cargo $CHARON_EXTRA
+        echo "::endgroup::"
+        echo "::group::Aeneas → Lean"
+        # Locate the .llbc file Charon emitted; should be next to Cargo.toml.
+        LLBC=$(ls *.llbc | head -1)
+        if [ -z "$LLBC" ]; then
+          echo "::error::No .llbc emitted by Charon — see Charon log above"
+          exit 1
+        fi
+        aeneas -backend lean "$LLBC" $AENEAS_EXTRA -dest "$ABS_LEAN_OUT"
+        echo "::endgroup::"
+
+    - name: Diff against committed Lean tree
+      id: diff
+      shell: bash
+      run: |
+        set -euo pipefail
+        if git diff --quiet -- "${{ inputs.lean-output-dir }}"; then
+          echo "drift=false" >> "$GITHUB_OUTPUT"
+          echo "✓ Regenerated Lean matches committed tree."
+        else
+          echo "drift=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Aeneas freshness drift detected"
+            echo ""
+            echo "The Lean tree at \`${{ inputs.lean-output-dir }}\` is out of"
+            echo "sync with the Rust source at \`${{ inputs.rust-source-dir }}\`."
+            echo ""
+            echo "**To fix locally:**"
+            echo ""
+            echo '```bash'
+            echo "cd ${{ inputs.rust-source-dir }}"
+            echo "charon cargo ${{ inputs.charon-extra-args }}"
+            echo "aeneas -backend lean *.llbc ${{ inputs.aeneas-extra-args }} \\"
+            echo "       -dest \$GITHUB_WORKSPACE/${{ inputs.lean-output-dir }}"
+            echo "git add ${{ inputs.lean-output-dir }} && git commit"
+            echo '```'
+            echo ""
+            echo "<details><summary>Diff</summary>"
+            echo ""
+            echo '```diff'
+            git diff -- "${{ inputs.lean-output-dir }}" | head -200
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.fail-on-drift }}" = "true" ]; then
+            echo "::error::Lean tree is stale; see job summary for regen instructions"
+            exit 1
+          fi
+        fi

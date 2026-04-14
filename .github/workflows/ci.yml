@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  self-test-minimal:
+    name: Self-test — minimal example
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./
+        with:
+          rust-source-dir: examples/minimal
+          lean-output-dir: examples/minimal/lean-out
+          # Pin to a recent compatible pair. Bump together; never independently.
+          # See AeneasVerif/aeneas/charon-pin for the matched ref.
+          charon-version: main
+          aeneas-version: main
+          fail-on-drift: 'false'   # First run only — examples/minimal/lean-out
+                                   # gets created. Flip to 'true' once committed.
+
+  shellcheck:
+    name: shellcheck install-aeneas.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: shellcheck scripts/install-aeneas.sh
