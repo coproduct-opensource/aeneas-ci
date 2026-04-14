@@ -47,8 +47,17 @@ if ! command -v opam >/dev/null 2>&1; then
   echo "::endgroup::"
 fi
 
-# Source opam env for the rest of the script.
+# Source opam env for the rest of the script. If no default switch exists
+# yet (fresh opam init --bare), create one with a pinned compiler — Charon
+# and Aeneas need OCaml 4.14+ and we pick one the ecosystem is building
+# against today.
 eval "$(opam env)" 2>/dev/null || true
+if ! opam switch show >/dev/null 2>&1; then
+  echo "::group::Create opam switch (OCaml 4.14.2)"
+  opam switch create ci 4.14.2 -y
+  eval "$(opam env --switch=ci)"
+  echo "::endgroup::"
+fi
 
 # Ensure elan / Lean is on PATH — Aeneas links against Lean stdlib at translate time.
 if ! command -v lean >/dev/null 2>&1; then
@@ -68,11 +77,19 @@ else
   CHARON_DIR="$CACHE_DIR/charon-$CHARON_REF"
   rm -rf "$CHARON_DIR"
   git clone --quiet https://github.com/AeneasVerif/charon.git "$CHARON_DIR"
-  # `make build` is the release target: builds both the Rust half
-  # (MIR extractor) and the OCaml half (charon-ml), then copies the
-  # binary into $CHARON_DIR/bin/charon. See
-  # https://github.com/AeneasVerif/charon/blob/main/Makefile
-  ( cd "$CHARON_DIR" && git checkout --quiet "$CHARON_REF" && make build -j )
+  (
+    cd "$CHARON_DIR"
+    git checkout --quiet "$CHARON_REF"
+    # Install Charon's OCaml deps (dune, menhir, visitors, ppx_deriving,
+    # zarith, etc.) from the charon.opam manifest. Without this
+    # `make build-charon-ml` fails with "dune: command not found" (exit 127).
+    opam install --deps-only -y . ./charon-ml
+    # `make build-dev` = debug build, skips cargo fmt (which needs rustfmt
+    # on the pinned nightly toolchain, not always available). The binary
+    # lands in bin/charon identically to release. See
+    # https://github.com/AeneasVerif/charon/blob/main/Makefile
+    make build-dev -j
+  )
   echo "::endgroup::"
 fi
 echo "$(dirname "$CHARON_BIN")" >> "$GITHUB_PATH"
@@ -85,9 +102,15 @@ else
   AENEAS_DIR="$CACHE_DIR/aeneas-$AENEAS_REF"
   rm -rf "$AENEAS_DIR"
   git clone --quiet https://github.com/AeneasVerif/aeneas.git "$AENEAS_DIR"
-  # Aeneas's default target is `build` = `build-dev`, which produces
-  # bin/aeneas. Requires Charon on PATH (already set above).
-  ( cd "$AENEAS_DIR" && git checkout --quiet "$AENEAS_REF" && make -j )
+  (
+    cd "$AENEAS_DIR"
+    git checkout --quiet "$AENEAS_REF"
+    # Install Aeneas's OCaml deps from its opam manifest.
+    opam install --deps-only -y . || true
+    # Default target = build-dev = build-bin + build-lib + build-bin-dir,
+    # which produces bin/aeneas. Requires Charon on PATH (set above).
+    make -j
+  )
   echo "::endgroup::"
 fi
 echo "$(dirname "$AENEAS_BIN")" >> "$GITHUB_PATH"
