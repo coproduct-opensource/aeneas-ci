@@ -42,13 +42,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: coproduct-opensource/aeneas-ci@v1
+      - uses: coproduct-opensource/aeneas-ci@v1.0.0
         with:
           rust-source-dir: crates/my-verified-core
           lean-output-dir: lean/generated
           charon-version: <pinned commit SHA>
           aeneas-version: <pinned commit SHA>
 ```
+
+Pin the patch (`@v1.0.0`) for the same reason the action enforces pinning
+on Charon/Aeneas — silent drift is the bug class this whole project
+exists to prevent. The floating major (`@v1`) is available if you want
+auto-uptake of bugfixes within the v1 line.
 
 That's it. PRs that drift now fail with a job summary like:
 
