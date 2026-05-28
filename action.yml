@@ -89,12 +89,28 @@ runs:
         charon cargo $CHARON_EXTRA
         echo "::endgroup::"
         echo "::group::Aeneas → Lean"
-        # Locate the .llbc file Charon emitted; should be next to Cargo.toml.
-        LLBC=$(ls *.llbc | head -1)
+        # Locate the .llbc file Charon emitted. Charon writes to its own
+        # cwd at runtime; for a workspace member, that's typically the
+        # member's source dir (next to Cargo.toml) — but cargo's normal
+        # behavior in workspaces can also land it at the workspace root.
+        # Search both, then fall back to a recursive search.
+        LLBC=""
+        for cand in *.llbc "$GITHUB_WORKSPACE"/*.llbc; do
+          if [ -f "$cand" ]; then
+            LLBC="$cand"
+            break
+          fi
+        done
+        if [ -z "$LLBC" ]; then
+          # Last-resort recursive search under the workspace.
+          LLBC=$(find "$GITHUB_WORKSPACE" -name '*.llbc' -type f 2>/dev/null | head -1)
+        fi
         if [ -z "$LLBC" ]; then
           echo "::error::No .llbc emitted by Charon — see Charon log above"
+          echo "Searched: cwd ($(pwd))/*.llbc, $GITHUB_WORKSPACE/*.llbc, and find -name '*.llbc' under workspace"
           exit 1
         fi
+        echo "Found LLBC: $LLBC"
         aeneas -backend lean "$LLBC" $AENEAS_EXTRA -dest "$ABS_LEAN_OUT"
         echo "::endgroup::"
 
