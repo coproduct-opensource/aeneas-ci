@@ -101,7 +101,7 @@ else
   )
   echo "::endgroup::"
 fi
-echo "$(dirname "$CHARON_BIN")" >> "$GITHUB_PATH"
+dirname "$CHARON_BIN" >> "$GITHUB_PATH"
 
 # ── Aeneas ───────────────────────────────────────────────────────────────
 if [ -x "$AENEAS_BIN" ]; then
@@ -114,6 +114,14 @@ else
   (
     cd "$AENEAS_DIR"
     git checkout --quiet "$AENEAS_REF"
+    # Aeneas's Makefile gates `make check-charon` on `./charon` existing
+    # as a clone (or symlink) inside the Aeneas tree. Without it the
+    # build fails with:
+    #   Error: `charon` not found. Please clone the charon repository
+    #   into `./charon` at the commit specified in `./charon-pin`, or
+    #   make a symlink to an existing clone of charon.
+    # Symlink the cached Charon clone we already built above.
+    ln -snf "$CACHE_DIR/charon-$CHARON_REF" ./charon
     # Install Aeneas's OCaml deps from its opam manifest.
     opam install --deps-only -y . || true
     # Default target = build = build-dev = build-bin + build-lib +
@@ -128,6 +136,6 @@ else
   )
   echo "::endgroup::"
 fi
-echo "$(dirname "$AENEAS_BIN")" >> "$GITHUB_PATH"
+dirname "$AENEAS_BIN" >> "$GITHUB_PATH"
 
 echo "✓ Charon + Aeneas installed (refs: $CHARON_REF / $AENEAS_REF)"
