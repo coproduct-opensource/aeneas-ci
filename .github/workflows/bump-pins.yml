@@ -1,0 +1,148 @@
+name: Bump upstream pins
+
+# Keeps the self-test's (charon, aeneas) pair fresh against upstream
+# AeneasVerif. Resolves the latest Aeneas nightly-YYYY.MM.DD tag, reads
+# its charon-pin, and opens a PR if either ref has moved.
+#
+# The action's own README says "Bump together; never independently" —
+# this workflow enforces that by always reading charon-pin from the same
+# Aeneas tag, so the pair is always coherent.
+#
+# Note: GITHUB_TOKEN-authored PRs do not trigger other workflows by
+# design (loop prevention). After this opens a PR, push an empty commit
+# or close/reopen it to fire the self-test. If you want CI to fire
+# automatically, swap GH_TOKEN for a PAT with `repo` + `workflow` scope.
+
+on:
+  schedule:
+    - cron: '0 9 1 * *'  # 09:00 UTC, 1st of every month
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve latest Aeneas nightly tag
+        id: aeneas
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # nightly-YYYY.MM.DD sorts correctly lexically. Limit 30 in case
+          # a non-nightly release sneaks to the top of the listing.
+          TAG=$(gh release list --repo AeneasVerif/aeneas --limit 30 --json tagName \
+                  --jq '[.[] | select(.tagName | startswith("nightly-"))] | sort_by(.tagName) | reverse | .[0].tagName')
+          if [ -z "$TAG" ]; then
+            echo "::error::No nightly-* release found on AeneasVerif/aeneas"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved latest Aeneas nightly: $TAG"
+
+      - name: Fetch charon-pin at that tag
+        id: charon
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # charon-pin format: `# comment line\n<40-char SHA>\n`
+          SHA=$(gh api "repos/AeneasVerif/aeneas/contents/charon-pin?ref=${{ steps.aeneas.outputs.tag }}" \
+                  --jq '.content' | base64 -d | grep -v '^#' | tr -d '[:space:]')
+          if [ "${#SHA}" -ne 40 ]; then
+            echo "::error::Failed to resolve a 40-char Charon SHA (got: '$SHA', len=${#SHA})"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Resolved Charon SHA: $SHA"
+
+      - name: Read current pins from ci.yml
+        id: current
+        run: |
+          set -euo pipefail
+          CURRENT_AENEAS=$(grep -oP 'aeneas-version:\s*\K\S+' .github/workflows/ci.yml)
+          CURRENT_CHARON=$(grep -oP 'charon-version:\s*\K\S+' .github/workflows/ci.yml)
+          echo "aeneas=$CURRENT_AENEAS" >> "$GITHUB_OUTPUT"
+          echo "charon=$CURRENT_CHARON" >> "$GITHUB_OUTPUT"
+          echo "Current pins: aeneas=$CURRENT_AENEAS, charon=$CURRENT_CHARON"
+
+      - name: Decide whether a bump is needed
+        id: decide
+        run: |
+          if [ "${{ steps.aeneas.outputs.tag }}" = "${{ steps.current.outputs.aeneas }}" ] \
+             && [ "${{ steps.charon.outputs.sha }}" = "${{ steps.current.outputs.charon }}" ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "✓ Pins already current — nothing to do."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "Bump needed:"
+            echo "  aeneas: ${{ steps.current.outputs.aeneas }} → ${{ steps.aeneas.outputs.tag }}"
+            echo "  charon: ${{ steps.current.outputs.charon }} → ${{ steps.charon.outputs.sha }}"
+          fi
+
+      - name: Open PR if needed
+        if: steps.decide.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_AENEAS: ${{ steps.aeneas.outputs.tag }}
+          NEW_CHARON: ${{ steps.charon.outputs.sha }}
+          OLD_AENEAS: ${{ steps.current.outputs.aeneas }}
+          OLD_CHARON: ${{ steps.current.outputs.charon }}
+        run: |
+          set -euo pipefail
+          BRANCH="auto/bump-pins-${NEW_AENEAS}"
+
+          # Skip if a PR is already open for this exact target tag.
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')" ]; then
+            echo "PR for branch $BRANCH already open — skipping."
+            exit 0
+          fi
+
+          # Edit ci.yml. Indentation is already left of the match, so no
+          # capture-group dance needed — and this stays portable across
+          # GNU/BSD sed for local repro.
+          sed -i -E "s|charon-version:[[:space:]]*[^[:space:]]+|charon-version: ${NEW_CHARON}|" .github/workflows/ci.yml
+          sed -i -E "s|aeneas-version:[[:space:]]*[^[:space:]]+|aeneas-version: ${NEW_AENEAS}|" .github/workflows/ci.yml
+
+          # Confirm the edits applied (sed exits 0 even when no substitution happens).
+          grep -q "charon-version: ${NEW_CHARON}" .github/workflows/ci.yml \
+            || { echo "::error::sed failed to update charon-version"; exit 1; }
+          grep -q "aeneas-version: ${NEW_AENEAS}" .github/workflows/ci.yml \
+            || { echo "::error::sed failed to update aeneas-version"; exit 1; }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add .github/workflows/ci.yml
+          git commit -m "chore: bump pinned (charon, aeneas) pair to ${NEW_AENEAS}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore: bump pinned (charon, aeneas) pair to ${NEW_AENEAS}" \
+            --body "$(cat <<EOF
+          Automated bump of the self-test pins to keep this repo's dogfooding
+          coherent with upstream AeneasVerif. Charon SHA was resolved from
+          \`charon-pin\` in the same Aeneas tag, so the pair is guaranteed
+          to be a matched one.
+
+          | Ref     | Old | New |
+          | ------- | --- | --- |
+          | aeneas  | \`${OLD_AENEAS}\` | \`${NEW_AENEAS}\` |
+          | charon  | \`${OLD_CHARON}\` | \`${NEW_CHARON}\` |
+
+          Source: [\`AeneasVerif/aeneas/charon-pin@${NEW_AENEAS}\`](https://github.com/AeneasVerif/aeneas/blob/${NEW_AENEAS}/charon-pin)
+
+          ---
+
+          **CI will not auto-run on this PR.** \`GITHUB_TOKEN\`-authored
+          PRs do not trigger other workflows. To fire the self-test:
+          push an empty commit, or close-and-reopen this PR. Or merge and
+          let the next push to \`main\` exercise it.
+          EOF
+          )"
