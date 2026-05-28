@@ -85,6 +85,11 @@ else
     # zarith, etc.) from the charon.opam manifest. Without this
     # `make build-charon-ml` fails with "dune: command not found" (exit 127).
     opam install --deps-only -y . ./charon-ml
+    # `charon-ml/Makefile`'s `build-dev` target runs `dune build @doc`,
+    # which requires `odoc`. odoc is NOT in charon-ml.opam's deps (docs
+    # are an extra), so install it explicitly. Without this, the build
+    # fails with "Program odoc not found in the tree or in PATH" (exit 2).
+    opam install -y odoc
     # Build the Rust driver and the OCaml side explicitly; the upstream
     # Makefile recommends this pair for CI. `build-dev` still aggregates
     # both but the explicit form is more future-proof against Makefile
