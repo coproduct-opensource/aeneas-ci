@@ -19,10 +19,13 @@ jobs:
         with:
           rust-source-dir: examples/minimal
           lean-output-dir: examples/minimal/lean-out
-          # Pin to a recent compatible pair. Bump together; never independently.
-          # See AeneasVerif/aeneas/charon-pin for the matched ref.
-          charon-version: main
-          aeneas-version: main
+          # Pinned compatible pair. The action's own README forbids floating
+          # refs ("charon-version main" was a silent-drift footgun — exactly
+          # what this action exists to prevent). Bump together; never
+          # independently. Charon SHA matches AeneasVerif/aeneas/charon-pin
+          # for the corresponding Aeneas nightly.
+          charon-version: 3c55c65462133f6847d9bed7380497395a1564a2
+          aeneas-version: nightly-2026.05.27
           fail-on-drift: 'false'   # First run only — examples/minimal/lean-out
                                    # gets created. Flip to 'true' once committed.
 

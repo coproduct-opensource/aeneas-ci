@@ -105,7 +105,7 @@ pipeline, and surfaces drift with copy-paste fix instructions.
 The action handles the freshness check. For the rest of the build, layer
 three independent caches in your consumer workflow:
 
-1. **Cargo / rustc** — `Swatinem/rust-cache@v2`, keyed on `Cargo.lock`.
+1. **Cargo / rustc** — `Swatinem/rust-cache@v2.9.1` (latest as of May 2026; no v3), keyed on `Cargo.lock`. Pin the patch — floating majors violate the same anti-drift principle this action enforces for Aeneas/Charon.
 2. **LLBC artifact** — `actions/cache`, keyed on `hashFiles('crates/*/src/**', 'Cargo.lock')` + `charon-version`.
 3. **Lake / Mathlib** — keyed on `lean-toolchain` + `lakefile.lean` + `lake-manifest.json`, plus `lake exe cache get` for prebuilt mathlib oleans.
 
