@@ -122,17 +122,44 @@ else
     #   make a symlink to an existing clone of charon.
     # Symlink the cached Charon clone we already built above.
     ln -snf "$CACHE_DIR/charon-$CHARON_REF" ./charon
-    # Install Aeneas's OCaml deps from its opam manifest.
-    opam install --deps-only -y . || true
+    # Aeneas has no aeneas.opam at the repo root — its dune `libraries`
+    # declaration in `src/dune` is the source of truth. `opam install
+    # --deps-only` therefore sees no deps and does nothing. Install the
+    # explicit set Aeneas's src/dune requires, plus the ppx tooling its
+    # preprocessor stanzas pull in:
+    #
+    #   src/dune libraries:
+    #     charon core_unix ocamlgraph str progress domainslib
+    #   src/dune pps:
+    #     ppx_deriving.{show,eq,ord} visitors.ppx
+    #   build-time errors hinted these were missing:
+    #     core_unix.sys_unix → opam package: core_unix
+    #     ppx_sexp_conv     → opam package: ppx_sexp_conv
+    #     domainslib        → opam package: domainslib
+    opam install -y \
+      core_unix \
+      ocamlgraph \
+      progress \
+      domainslib \
+      ppx_deriving \
+      visitors \
+      ppx_sexp_conv \
+      menhir \
+      zarith
     # Default target = build = build-dev = build-bin + build-lib +
     # build-bin-dir, which produces bin/aeneas. Requires Charon on PATH
     # (set above).
+    #
+    # `-j1` avoids "Another Dune instance is currently running" when
+    # the Makefile parallelizes build-bin / build-lib / build-runner —
+    # they all invoke `dune build` and dune cannot run concurrently on
+    # the same workspace.
     #
     # DO NOT export IN_CI=true here. Aeneas's Makefile gates `build-dev`
     # to be a no-op (`@true`) when IN_CI is set, on the assumption that
     # the build already happened in an earlier CI step. Setting it would
     # skip the build entirely and leave bin/aeneas missing.
-    make -j
+    make -j1
   )
   echo "::endgroup::"
 fi
