@@ -46,7 +46,16 @@ inputs:
   charon-extra-args:
     description: >
       Extra args appended to `charon cargo`. Default is `--preset aeneas`.
+      The string is `eval`-expanded, so single-quoted arguments containing
+      spaces (e.g. Charon `--opaque` name-matcher patterns) survive intact.
     default: '--preset aeneas'
+    required: false
+  charon-toolchain:
+    description: >
+      If set, exported as RUSTUP_TOOLCHAIN for the `charon cargo` run (Charon
+      typically needs the specific nightly it targets, independent of the
+      repo's own toolchain pin). Empty = use the environment's default.
+    default: ''
     required: false
   aeneas-extra-args:
     description: >
@@ -81,12 +90,18 @@ runs:
         LEAN_OUT_DIR: ${{ inputs.lean-output-dir }}
         CHARON_EXTRA: ${{ inputs.charon-extra-args }}
         AENEAS_EXTRA: ${{ inputs.aeneas-extra-args }}
+        CHARON_TOOLCHAIN: ${{ inputs.charon-toolchain }}
       run: |
         set -euo pipefail
         # Resolve Lean output to absolute path before cd'ing into Rust src dir.
         ABS_LEAN_OUT="$GITHUB_WORKSPACE/$LEAN_OUT_DIR"
         echo "::group::Charon cargo"
-        charon cargo $CHARON_EXTRA
+        if [ -n "$CHARON_TOOLCHAIN" ]; then
+          export RUSTUP_TOOLCHAIN="$CHARON_TOOLCHAIN"
+        fi
+        # eval so quoted args with spaces (--opaque patterns) survive.
+        eval "charon cargo $CHARON_EXTRA"
+        unset RUSTUP_TOOLCHAIN
         echo "::endgroup::"
         echo "::group::Aeneas → Lean"
         # Locate the .llbc file Charon emitted. Charon writes to its own
