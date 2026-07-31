@@ -104,25 +104,30 @@ runs:
         unset RUSTUP_TOOLCHAIN
         echo "::endgroup::"
         echo "::group::Aeneas → Lean"
-        # Locate the .llbc file Charon emitted. Charon writes to its own
-        # cwd at runtime; for a workspace member, that's typically the
+        # Locate the .llbc file Charon emitted FOR THIS CRATE. Charon writes to
+        # its own cwd at runtime; for a workspace member, that's typically the
         # member's source dir (next to Cargo.toml) — but cargo's normal
         # behavior in workspaces can also land it at the workspace root.
-        # Search both, then fall back to a recursive search.
+        # Match by the crate's stem (package name with `-` → `_`), NOT a bare
+        # `*.llbc` glob: when one workflow runs this action for several crates
+        # in the same workspace, a bare glob picks up the PREVIOUS target's
+        # leftover .llbc and silently translates the wrong crate.
+        STEM="$(basename "$RUST_SRC_DIR" | tr '-' '_')"
         LLBC=""
-        for cand in *.llbc "$GITHUB_WORKSPACE"/*.llbc; do
+        for cand in "$STEM.llbc" "$GITHUB_WORKSPACE/$STEM.llbc"; do
           if [ -f "$cand" ]; then
             LLBC="$cand"
             break
           fi
         done
         if [ -z "$LLBC" ]; then
-          # Last-resort recursive search under the workspace.
-          LLBC=$(find "$GITHUB_WORKSPACE" -name '*.llbc' -type f 2>/dev/null | head -1)
+          # Last-resort recursive search under the workspace, still stem-bound.
+          LLBC=$(find "$GITHUB_WORKSPACE" -name "$STEM.llbc" -type f 2>/dev/null | head -1)
         fi
         if [ -z "$LLBC" ]; then
-          echo "::error::No .llbc emitted by Charon — see Charon log above"
-          echo "Searched: cwd ($(pwd))/*.llbc, $GITHUB_WORKSPACE/*.llbc, and find -name '*.llbc' under workspace"
+          echo "::error::No $STEM.llbc emitted by Charon — see Charon log above"
+          echo "Searched: cwd ($(pwd)), $GITHUB_WORKSPACE, and recursively under workspace"
+          echo "All .llbc present: $(find "$GITHUB_WORKSPACE" -name '*.llbc' -type f 2>/dev/null | tr '\n' ' ')"
           exit 1
         fi
         echo "Found LLBC: $LLBC"
