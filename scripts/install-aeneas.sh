@@ -136,12 +136,15 @@ else
     #     core_unix.sys_unix → opam package: core_unix
     #     ppx_sexp_conv     → opam package: ppx_sexp_conv
     #     domainslib        → opam package: domainslib
+    #   nightly-2026.07 aeneas src/dune additionally requires:
+    #     ppx_deriving_yojson (and its yojson runtime)
     opam install -y \
       core_unix \
       ocamlgraph \
       progress \
       domainslib \
       ppx_deriving \
+      ppx_deriving_yojson \
       visitors \
       ppx_sexp_conv \
       menhir \
