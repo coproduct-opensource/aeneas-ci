@@ -143,7 +143,9 @@ runs:
             echo "<details><summary>Diff</summary>"
             echo ""
             echo '```diff'
-            git diff -- "${{ inputs.lean-output-dir }}" | head -200
+            # `|| true` guards the SIGPIPE `head` sends git-diff on >200-line
+            # diffs — under `set -o pipefail` that otherwise exits 141 mid-block.
+            git diff -- "${{ inputs.lean-output-dir }}" | head -200 || true
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
